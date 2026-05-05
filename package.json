@@ -1,0 +1,62 @@
+{
+  "name": "mpp-test-sdk",
+  "version": "1.0.0",
+  "description": "Test pay-per-request APIs on Tempo testnet. Zero setup - auto-creates wallets and handles 402 payments.",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build && npm run test"
+  },
+  "dependencies": {
+    "mppx": "^0.6.3",
+    "viem": "^2.48.4"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "mpp",
+    "payments",
+    "test",
+    "sdk",
+    "402",
+    "pay-per-request",
+    "tempo",
+    "testnet",
+    "machine-to-machine"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mpptestkit/mpp-test-sdk"
+  },
+  "homepage": "https://mpptestkit.com",
+  "bugs": {
+    "url": "https://github.com/mpptestkit/mpp-test-sdk/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
