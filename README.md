@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/node/v/mpp-test-sdk)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-zinc.svg)](LICENSE)
 
-Test pay-per-request APIs on **Solana** — devnet, testnet, or mainnet. Auto-creates wallets, airdrops SOL, handles HTTP 402 MPP payments. Zero setup required.
+Test pay-per-request APIs on **Solana** - devnet, testnet, or mainnet. Auto-creates wallets, airdrops SOL, handles HTTP 402 MPP payments. Zero setup required.
 
 **[mpptestkit.com](https://mpptestkit.com)** · [Playground](https://mpptestkit.com/playground) · [Docs](https://mpptestkit.com/docs) · [GitHub](https://github.com/mpptestkit/mpp-test-sdk) · [X](https://x.com/mpptestkit)
 
@@ -63,10 +63,10 @@ import { createTestServer } from "mpp-test-sdk";
 const app = express();
 const mpp = createTestServer(); // auto-generates server wallet
 
-// Free — no middleware
+// Free - no middleware
 app.get("/api/ping", (req, res) => res.json({ ok: true }));
 
-// Paid — one line (0.001 SOL)
+// Paid - one line (0.001 SOL)
 app.get("/api/data",
   mpp.charge({ amount: "0.001" }),
   (req, res) => res.json({ data: "premium content" })
@@ -92,7 +92,7 @@ Creates a client with its own isolated Solana wallet.
 |---|---|---|---|
 | `network` | `"devnet" \| "testnet" \| "mainnet"` | `"devnet"` | Solana network to use |
 | `secretKey` | `Uint8Array \| number[]` | auto-generated | Reuse a pre-funded keypair (required on mainnet) |
-| `onStep` | `(step: PaymentStep) => void` | — | Lifecycle event callback |
+| `onStep` | `(step: PaymentStep) => void` | - | Lifecycle event callback |
 | `timeout` | `number` | `30000` | Full flow timeout in ms |
 
 Returns `Promise<TestClient>`:
@@ -106,8 +106,8 @@ interface TestClient {
 ```
 
 **Throws:**
-- `MppFaucetError` — devnet/testnet airdrop failed
-- `MppNetworkError` — mainnet used without a `secretKey`
+- `MppFaucetError` - devnet/testnet airdrop failed
+- `MppNetworkError` - mainnet used without a `secretKey`
 
 ### `createTestServer(config?)`
 
@@ -122,7 +122,7 @@ Creates Express middleware that enforces payment on any route.
 
 | Property | Description |
 |---|---|
-| `mpp.recipientAddress` | Server wallet public key — payments land here |
+| `mpp.recipientAddress` | Server wallet public key - payments land here |
 | `mpp.network` | Active network |
 
 ### `mpp.charge(opts)`
@@ -164,16 +164,16 @@ try {
   if (err instanceof MppNetworkError) {
     // Mainnet used without secretKey
   } else if (err instanceof MppFaucetError) {
-    // Devnet/testnet airdrop failed — err.address
+    // Devnet/testnet airdrop failed - err.address
   } else if (err instanceof MppPaymentError) {
-    // Server rejected payment — err.status, err.url
+    // Server rejected payment - err.status, err.url
   } else if (err instanceof MppTimeoutError) {
-    // Flow timed out — err.url, err.timeoutMs
+    // Flow timed out - err.url, err.timeoutMs
   }
 }
 ```
 
-**Tip:** Pass a pre-funded `secretKey` to skip faucet calls entirely — useful in CI or when devnet is rate-limiting.
+**Tip:** Pass a pre-funded `secretKey` to skip faucet calls entirely - useful in CI or when devnet is rate-limiting.
 
 ---
 
@@ -205,7 +205,7 @@ On-chain verification confirms: transaction exists, recipient matches, SOL delta
 // Devnet (default)
 const client = await createTestClient({ network: "devnet" });
 
-// Mainnet — bring your own funded keypair
+// Mainnet - bring your own funded keypair
 const client = await createTestClient({
   network: "mainnet",
   secretKey: Uint8Array.from(JSON.parse(process.env.SOLANA_SECRET_KEY!)),
@@ -216,13 +216,13 @@ const client = await createTestClient({
 
 ## Troubleshooting
 
-**`MppFaucetError`** — Devnet airdrop is rate-limited. Wait 30–60 seconds and retry, or pass a pre-funded `secretKey` to skip the faucet.
+**`MppFaucetError`** - Devnet airdrop is rate-limited. Wait 30–60 seconds and retry, or pass a pre-funded `secretKey` to skip the faucet.
 
-**`MppNetworkError`** — You passed `network: "mainnet"` without a `secretKey`. Mainnet has no faucet — provide a funded keypair.
+**`MppNetworkError`** - You passed `network: "mainnet"` without a `secretKey`. Mainnet has no faucet - provide a funded keypair.
 
-**`MppTimeoutError`** — Increase `timeout` in `createTestClient`. Solana devnet confirmations typically take 1–3 seconds.
+**`MppTimeoutError`** - Increase `timeout` in `createTestClient`. Solana devnet confirmations typically take 1–3 seconds.
 
-**402 not handled** — Ensure `mpp.charge()` middleware is placed before the route handler on the server.
+**402 not handled** - Ensure `mpp.charge()` middleware is placed before the route handler on the server.
 
 ---
 
