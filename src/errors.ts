@@ -9,7 +9,11 @@ export class MppFaucetError extends MppError {
   public readonly address: string;
 
   constructor(address: string, cause?: unknown) {
-    super(`Failed to fund wallet ${address} from testnet faucet`);
+    super(
+      `Failed to airdrop SOL to wallet ${address}. ` +
+        `The devnet/testnet faucet may be rate-limited. ` +
+        `Wait 30s and retry, or pass a pre-funded secretKey to skip airdrop.`,
+    );
     this.name = "MppFaucetError";
     this.address = address;
     this.cause = cause;
@@ -34,9 +38,24 @@ export class MppTimeoutError extends MppError {
   public readonly timeoutMs: number;
 
   constructor(url: string, timeoutMs: number) {
-    super(`Request to ${url} timed out after ${timeoutMs}ms`);
+    super(`Request to ${url} timed out after ${timeoutMs}ms. ` +
+      `Increase the timeout option or check your Solana RPC connection.`);
     this.name = "MppTimeoutError";
     this.url = url;
     this.timeoutMs = timeoutMs;
+  }
+}
+
+export class MppNetworkError extends MppError {
+  public readonly network: string;
+
+  constructor(network: string, message?: string) {
+    super(
+      message ??
+        `Network configuration error for "${network}". ` +
+          `Mainnet requires a pre-funded secretKey (no airdrop available).`,
+    );
+    this.name = "MppNetworkError";
+    this.network = network;
   }
 }
