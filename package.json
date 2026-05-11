@@ -1,6 +1,6 @@
 {
   "name": "mpp-test-sdk",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Test pay-per-request APIs on Solana devnet. Auto-creates wallets, airdrops SOL, handles 402 MPP payments - zero setup required.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
