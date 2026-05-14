@@ -25,6 +25,14 @@ const AIRDROP_NETWORKS: SolanaNetwork[] = ["devnet", "testnet"];
 
 // ─── Types ────────────────────────────────────────────────────
 
+/**
+ * Solana transaction confirmation level.
+ * - `"processed"` - Fastest. Node has processed the transaction (may be rolled back on forks).
+ * - `"confirmed"` - Default. Supermajority of the cluster has confirmed the transaction.
+ * - `"finalized"` - Slowest. Transaction is permanently committed and cannot be rolled back.
+ */
+export type ConfirmationLevel = "processed" | "confirmed" | "finalized";
+
 export interface PaymentStep {
   type: "wallet-created" | "funded" | "request" | "payment" | "retry" | "success" | "error";
   message: string;
@@ -51,6 +59,13 @@ export interface TestClientConfig {
   timeout?: number;
   /** Override the Solana RPC endpoint. Takes precedence over `network`. */
   rpcUrl?: string;
+  /**
+   * Solana transaction confirmation level for payment transactions.
+   * - `"processed"` - Fastest, lowest finality guarantee.
+   * - `"confirmed"` - Default. Supermajority confirmation.
+   * - `"finalized"` - Highest finality. Slower but irreversible.
+   */
+  confirmationLevel?: ConfirmationLevel;
 }
 
 export interface TestClient {
@@ -70,12 +85,14 @@ export interface TestClient {
 async function airdropWithRetry(
   connection: Connection,
   publicKey: PublicKey,
+  commitment: ConfirmationLevel,
   retries = 3,
 ): Promise<void> {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(commitment);
       const sig = await connection.requestAirdrop(publicKey, 2 * LAMPORTS_PER_SOL);
-      await connection.confirmTransaction(sig, "confirmed");
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, commitment);
       return;
     } catch (err) {
       if (attempt === retries - 1) {
@@ -146,6 +163,7 @@ export async function createTestClient(config?: TestClientConfig): Promise<TestC
   const timeout = config?.timeout ?? 30_000;
   const network: SolanaNetwork = config?.network ?? "devnet";
   const rpcUrl = config?.rpcUrl ?? NETWORK_RPC[network];
+  const confirmationLevel: ConfirmationLevel = config?.confirmationLevel ?? "confirmed";
 
   // Mainnet requires a pre-funded wallet
   if (network === "mainnet" && !config?.secretKey) {
@@ -161,7 +179,7 @@ export async function createTestClient(config?: TestClientConfig): Promise<TestC
     ? Keypair.fromSecretKey(config.secretKey)
     : Keypair.generate();
 
-  const connection = new Connection(rpcUrl, "confirmed");
+  const connection = new Connection(rpcUrl, confirmationLevel);
   const address = keypair.publicKey.toBase58();
 
   emit({
@@ -172,7 +190,7 @@ export async function createTestClient(config?: TestClientConfig): Promise<TestC
 
   // Fund via airdrop on devnet/testnet; skip on mainnet
   if (AIRDROP_NETWORKS.includes(network)) {
-    await airdropWithRetry(connection, keypair.publicKey);
+    await airdropWithRetry(connection, keypair.publicKey, confirmationLevel);
     emit({
       type: "funded",
       message: `Wallet funded via ${network} airdrop (2 SOL)`,
@@ -248,11 +266,11 @@ export async function createTestClient(config?: TestClientConfig): Promise<TestC
       });
 
       // Step 3: Build and submit SOL transfer
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      const tx = new Transaction({
-        recentBlockhash: blockhash,
-        feePayer: keypair.publicKey,
-      }).add(
+      const { blockhash } = await connection.getLatestBlockhash(confirmationLevel);
+      const tx = new Transaction();
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = keypair.publicKey;
+      tx.add(
         SystemProgram.transfer({
           fromPubkey: keypair.publicKey,
           toPubkey: recipient,
@@ -261,7 +279,7 @@ export async function createTestClient(config?: TestClientConfig): Promise<TestC
       );
 
       const signature = await sendAndConfirmTransaction(connection, tx, [keypair], {
-        commitment: "confirmed",
+        commitment: confirmationLevel,
       });
 
       emit({

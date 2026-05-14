@@ -1,5 +1,5 @@
 export class MppError extends Error {
-  override readonly name = "MppError";
+  override readonly name: string = "MppError";
   constructor(message: string) {
     super(message);
   }
@@ -56,7 +56,7 @@ export class MppNetworkError extends MppError {
     super(
       message ??
       `Network error for "${network}". ` +
-      `Mainnet requires a pre-funded secretKey — no airdrop available.`,
+      `Mainnet requires a pre-funded secretKey - no airdrop available.`,
     );
     this.network = network;
   }

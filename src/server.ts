@@ -5,7 +5,7 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import type { RequestHandler } from "express";
-import type { SolanaNetwork } from "./client";
+import type { ConfirmationLevel, SolanaNetwork } from "./client";
 
 const NETWORK_RPC: Record<SolanaNetwork, string> = {
   devnet: "https://api.devnet.solana.com",
@@ -52,6 +52,13 @@ export interface TestServerConfig {
   recipientAddress?: string;
   /** Override the Solana RPC endpoint. Takes precedence over `network`. */
   rpcUrl?: string;
+  /**
+   * Minimum confirmation level required when verifying payment transactions.
+   * - `"processed"` - Fastest, lowest finality guarantee.
+   * - `"confirmed"` - Default. Supermajority confirmation.
+   * - `"finalized"` - Highest finality. Slowest but irreversible.
+   */
+  confirmationLevel?: ConfirmationLevel;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -95,6 +102,7 @@ function parseHeaderParams(header: string): Record<string, string> {
 export function createTestServer(config: TestServerConfig = {}): MppServer {
   const network: SolanaNetwork = config.network ?? "devnet";
   const rpcUrl = config.rpcUrl ?? NETWORK_RPC[network];
+  const confirmationLevel: ConfirmationLevel = config.confirmationLevel ?? "confirmed";
 
   const serverKeypair = config.secretKey
     ? Keypair.fromSecretKey(config.secretKey)
@@ -103,7 +111,7 @@ export function createTestServer(config: TestServerConfig = {}): MppServer {
   const recipientAddress =
     config.recipientAddress ?? serverKeypair.publicKey.toBase58();
 
-  const connection = new Connection(rpcUrl, "confirmed");
+  const connection = new Connection(rpcUrl, confirmationLevel);
 
   const charge =
     ({ amount }: ChargeOptions): RequestHandler =>
@@ -153,8 +161,10 @@ export function createTestServer(config: TestServerConfig = {}): MppServer {
         }
 
         // Fetch and validate Solana transaction
+        // getParsedTransaction only accepts Finality ("confirmed" | "finalized")
+        const txCommitment = confirmationLevel === "finalized" ? "finalized" : "confirmed";
         const tx = await connection.getParsedTransaction(signature, {
-          commitment: "confirmed",
+          commitment: txCommitment,
           maxSupportedTransactionVersion: 0,
         });
 
