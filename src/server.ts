@@ -5,60 +5,70 @@ import {
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import type { RequestHandler } from "express";
-import type { ConfirmationLevel, SolanaNetwork } from "./client";
+import type { ChainType, ConfirmationLevel, SolanaNetwork, BaseNetwork } from "./client";
 
-const NETWORK_RPC: Record<SolanaNetwork, string> = {
+const SOLANA_RPC: Record<SolanaNetwork, string> = {
   devnet: "https://api.devnet.solana.com",
   testnet: "https://api.testnet.solana.com",
   mainnet: "https://api.mainnet-beta.solana.com",
 };
 
+const BASE_RPC: Record<BaseNetwork, string> = {
+  sepolia: "https://sepolia.base.org",
+  mainnet: "https://mainnet.base.org",
+};
+
 // ─── Types ────────────────────────────────────────────────────
 
 export interface ChargeOptions {
-  /** Amount to charge in SOL (e.g. "0.001"). */
+  /** Amount to charge (SOL for Solana, ETH for Base). E.g. "0.001". */
   amount: string;
 }
 
 export interface MppServer {
   /**
-   * Express middleware that requires SOL payment before passing to the route handler.
+   * Express middleware that requires on-chain payment before passing to the route handler.
    *
    * - No receipt → 402 with `Payment-Request` header.
    * - Valid receipt + on-chain confirmation → calls `next()`.
    * - Invalid or insufficient payment → 403.
    */
   charge: (opts: ChargeOptions) => RequestHandler;
-  /** The Solana address where payments are sent. */
+  /** The address where payments are sent. */
   recipientAddress: string;
   /** Network this server is configured for. */
-  network: SolanaNetwork;
+  network: SolanaNetwork | BaseNetwork;
+  /** Chain this server accepts payments on. */
+  chain: ChainType;
 }
 
 export interface TestServerConfig {
-  /**
-   * Solana network to connect to.
-   * - `"devnet"` (default) - Solana devnet.
-   * - `"testnet"` - Solana testnet.
-   * - `"mainnet"` - Solana mainnet (real SOL).
-   */
+  /** Chain to accept payments on. Default: `"solana"`. */
+  chain?: ChainType;
+
+  // ── Solana options ──────────────────────────────────────────
+
+  /** Solana network. Default: `"devnet"`. */
   network?: SolanaNetwork;
   /** Server wallet keypair secret key. Auto-generated if omitted. */
   secretKey?: Uint8Array;
-  /**
-   * Override the recipient Solana address (base58).
-   * Defaults to the server keypair's public key.
-   */
-  recipientAddress?: string;
-  /** Override the Solana RPC endpoint. Takes precedence over `network`. */
+  /** Override the Solana RPC endpoint. */
   rpcUrl?: string;
   /**
-   * Minimum confirmation level required when verifying payment transactions.
-   * - `"processed"` - Fastest, lowest finality guarantee.
-   * - `"confirmed"` - Default. Supermajority confirmation.
-   * - `"finalized"` - Highest finality. Slowest but irreversible.
+   * Minimum confirmation level for verifying Solana payment transactions.
+   * Default: `"confirmed"`.
    */
   confirmationLevel?: ConfirmationLevel;
+
+  // ── Base options ────────────────────────────────────────────
+
+  /** Base network. Default: `"sepolia"`. */
+  baseNetwork?: BaseNetwork;
+  /**
+   * Recipient address for Base payments (EVM 0x address).
+   * Auto-generated if omitted (useful for testing; save address to track funds).
+   */
+  recipientAddress?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -77,49 +87,60 @@ function parseHeaderParams(header: string): Record<string, string> {
   return params;
 }
 
+function randomEvmAddress(): string {
+  const bytes = new Uint8Array(20);
+  if (typeof globalThis.crypto !== "undefined" && globalThis.crypto.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 20; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return "0x" + Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 // ─── createTestServer ─────────────────────────────────────────
 
 /**
- * Create a Solana MPP-enabled Express server.
- *
- * Handles the HTTP 402 payment flow and verifies SOL transfers on-chain.
- * No config needed - auto-generates a server wallet.
+ * Create an MPP-enabled Express server for Solana or Base.
  *
  * @example
  * ```ts
- * import express from "express";
- * import { createTestServer } from "mpp-test-sdk";
+ * // Solana (default)
+ * const mpp = createTestServer();
  *
- * const app = express();
- * const mpp = createTestServer();  // or createTestServer({ network: "mainnet" })
+ * // Base Sepolia
+ * const mpp = createTestServer({ chain: "base", baseNetwork: "sepolia" });
  *
- * // Charge 0.001 SOL per request
- * app.get("/api/data", mpp.charge({ amount: "0.001" }), (req, res) => {
- *   res.json({ data: "premium content" });
- * });
+ * app.get("/api/data", mpp.charge({ amount: "0.001" }), handler);
  * ```
  */
 export function createTestServer(config: TestServerConfig = {}): MppServer {
+  const chain: ChainType = config.chain ?? "solana";
+
+  if (chain === "base") {
+    return createBaseServer(config);
+  }
+  return createSolanaServer(config);
+}
+
+// ─── Solana server ────────────────────────────────────────────
+
+function createSolanaServer(config: TestServerConfig): MppServer {
   const network: SolanaNetwork = config.network ?? "devnet";
-  const rpcUrl = config.rpcUrl ?? NETWORK_RPC[network];
+  const rpcUrl = config.rpcUrl ?? SOLANA_RPC[network];
   const confirmationLevel: ConfirmationLevel = config.confirmationLevel ?? "confirmed";
 
   const serverKeypair = config.secretKey
     ? Keypair.fromSecretKey(config.secretKey)
     : Keypair.generate();
 
-  const recipientAddress =
-    config.recipientAddress ?? serverKeypair.publicKey.toBase58();
-
+  const recipientAddress = config.recipientAddress ?? serverKeypair.publicKey.toBase58();
   const connection = new Connection(rpcUrl, confirmationLevel);
 
   const charge =
     ({ amount }: ChargeOptions): RequestHandler =>
     async (req, res, next) => {
-      const receiptHeader =
-        (req.headers["payment-receipt"] as string | undefined) ?? "";
+      const receiptHeader = (req.headers["payment-receipt"] as string | undefined) ?? "";
 
-      // No receipt - return 402 with payment terms
       if (!receiptHeader) {
         res
           .status(402)
@@ -129,17 +150,11 @@ export function createTestServer(config: TestServerConfig = {}): MppServer {
           )
           .json({
             error: "Payment Required",
-            payment: {
-              amount,
-              currency: "SOL",
-              recipient: recipientAddress,
-              network,
-            },
+            payment: { amount, currency: "SOL", recipient: recipientAddress, network, chain: "solana" },
           });
         return;
       }
 
-      // Receipt present - verify on-chain
       try {
         const params = parseHeaderParams(receiptHeader);
         const { signature } = params;
@@ -149,10 +164,8 @@ export function createTestServer(config: TestServerConfig = {}): MppServer {
           return;
         }
 
-        // Validate claimed amount
         const paidAmount = parseFloat(params.amount ?? "0");
         const requiredAmount = parseFloat(amount);
-
         if (isNaN(paidAmount) || paidAmount < requiredAmount) {
           res.status(403).json({
             error: `Insufficient payment: claimed ${params.amount ?? "0"} SOL, required ${amount} SOL`,
@@ -160,25 +173,15 @@ export function createTestServer(config: TestServerConfig = {}): MppServer {
           return;
         }
 
-        // Fetch and validate Solana transaction
-        // getParsedTransaction only accepts Finality ("confirmed" | "finalized")
         const txCommitment = confirmationLevel === "finalized" ? "finalized" : "confirmed";
         const tx = await connection.getParsedTransaction(signature, {
           commitment: txCommitment,
           maxSupportedTransactionVersion: 0,
         });
 
-        if (!tx) {
-          res.status(403).json({ error: "Transaction not found on chain" });
-          return;
-        }
+        if (!tx) { res.status(403).json({ error: "Transaction not found on chain" }); return; }
+        if (tx.meta?.err) { res.status(403).json({ error: "Transaction failed on chain" }); return; }
 
-        if (tx.meta?.err) {
-          res.status(403).json({ error: "Transaction failed on chain" });
-          return;
-        }
-
-        // Verify the recipient received at least the required amount
         const accountKeys = tx.transaction.message.accountKeys;
         const preBalances = tx.meta?.preBalances ?? [];
         const postBalances = tx.meta?.postBalances ?? [];
@@ -189,15 +192,11 @@ export function createTestServer(config: TestServerConfig = {}): MppServer {
         );
 
         if (recipientIdx < 0) {
-          res.status(403).json({
-            error: `Recipient ${recipientAddress.slice(0, 8)}... not found in transaction`,
-          });
+          res.status(403).json({ error: `Recipient ${recipientAddress.slice(0, 8)}... not found in transaction` });
           return;
         }
 
-        const received =
-          (postBalances[recipientIdx] - preBalances[recipientIdx]) / LAMPORTS_PER_SOL;
-
+        const received = (postBalances[recipientIdx] - preBalances[recipientIdx]) / LAMPORTS_PER_SOL;
         if (received < requiredAmount) {
           res.status(403).json({
             error: `Payment too small: received ${received} SOL, required ${requiredAmount} SOL`,
@@ -212,9 +211,95 @@ export function createTestServer(config: TestServerConfig = {}): MppServer {
       }
     };
 
-  return {
-    charge,
-    recipientAddress,
-    network,
-  };
+  return { charge, recipientAddress, network, chain: "solana" };
+}
+
+// ─── Base server ──────────────────────────────────────────────
+
+function createBaseServer(config: TestServerConfig): MppServer {
+  const baseNetwork: BaseNetwork = config.baseNetwork ?? "sepolia";
+  const rpcUrl = config.rpcUrl ?? BASE_RPC[baseNetwork];
+  const recipientAddress = config.recipientAddress ?? randomEvmAddress();
+
+  const charge =
+    ({ amount }: ChargeOptions): RequestHandler =>
+    async (req, res, next) => {
+      const receiptHeader = (req.headers["payment-receipt"] as string | undefined) ?? "";
+
+      if (!receiptHeader) {
+        res
+          .status(402)
+          .set(
+            "Payment-Request",
+            `base; amount="${amount}"; recipient="${recipientAddress}"; network="${baseNetwork}"`,
+          )
+          .json({
+            error: "Payment Required",
+            payment: { amount, currency: "ETH", recipient: recipientAddress, network: baseNetwork, chain: "base" },
+          });
+        return;
+      }
+
+      try {
+        const params = parseHeaderParams(receiptHeader);
+        const txHash = params.txhash ?? params.signature;
+
+        if (!txHash) {
+          res.status(403).json({ error: "Payment-Receipt missing txHash field" });
+          return;
+        }
+
+        const paidAmount = parseFloat(params.amount ?? "0");
+        const requiredAmount = parseFloat(amount);
+        if (isNaN(paidAmount) || paidAmount < requiredAmount) {
+          res.status(403).json({
+            error: `Insufficient payment: claimed ${params.amount ?? "0"} ETH, required ${amount} ETH`,
+          });
+          return;
+        }
+
+        // Load ethers dynamically — only needed for Base chain verification
+        let ethersModule: typeof import("ethers");
+        try {
+          ethersModule = await import("ethers");
+        } catch {
+          res.status(500).json({ error: "ethers v6 is required for Base chain. npm install ethers" });
+          return;
+        }
+
+        const { JsonRpcProvider, parseEther, formatEther } = ethersModule;
+        const provider = new JsonRpcProvider(rpcUrl);
+
+        const receipt = await provider.getTransactionReceipt(txHash);
+        if (!receipt || receipt.status !== 1) {
+          res.status(403).json({ error: "Transaction not confirmed on Base" });
+          return;
+        }
+
+        const tx = await provider.getTransaction(txHash);
+        if (!tx) {
+          res.status(403).json({ error: "Transaction not found on Base" });
+          return;
+        }
+
+        if (tx.to?.toLowerCase() !== recipientAddress.toLowerCase()) {
+          res.status(403).json({ error: `Transaction recipient mismatch: expected ${recipientAddress}` });
+          return;
+        }
+
+        if (tx.value < parseEther(amount)) {
+          res.status(403).json({
+            error: `Payment too small: received ${formatEther(tx.value)} ETH, required ${amount} ETH`,
+          });
+          return;
+        }
+
+        next();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        res.status(403).json({ error: `Payment verification failed: ${message}` });
+      }
+    };
+
+  return { charge, recipientAddress, network: baseNetwork, chain: "base" };
 }
